@@ -310,6 +310,33 @@ class UpsampleAgame(nn.Module):
         h = F.upsample(h, scale_factor=4, mode='bilinear')
         return h
 
+class UpsampleLC(nn.Module):
+    def __init__(self, nchannels_feats, nchannels):
+        super().__init__()
+        self.project_lc4 = SUBMODS['ConvRelu'](nchannels_feats['lc4'], nchannels, 1, 1, 0)
+        self.blend_lc4 = SUBMODS['ConvRelu'](nchannels*2, nchannels, 3, 1, 1)
+        self.project_lc3 = SUBMODS['ConvRelu'](nchannels_feats['lc3'], nchannels, 1, 1, 0)
+        self.blend_lc3 = SUBMODS['ConvRelu'](nchannels*2, nchannels, 3, 1, 1)
+        self.project_lc2 = SUBMODS['ConvRelu'](nchannels_feats['lc2'], nchannels, 1, 1, 0)
+        self.blend_lc2 = SUBMODS['ConvRelu'](nchannels*2, nchannels, 3, 1, 1)
+        self.project_lc1 = SUBMODS['ConvRelu'](nchannels_feats['lc1'], nchannels, 1, 1, 0)
+        self.blend_lc1 = SUBMODS['ConvRelu'](nchannels*2, nchannels, 3, 1, 1)
+        self.predictor = SUBMODS['Conv'](nchannels, 2, 3, 1, 1)
+    def forward(self, feats, fused_feats, state):
+        h = fused_feats
+        h = torch.cat([self.project_lc4(feats['lc4']), h], dim=-3)
+        h = self.blend_lc4(h)
+        h = torch.cat([self.project_lc3(feats['lc3']), h], dim=-3)
+        h = self.blend_lc3(h)
+        h = torch.cat([self.project_lc2(feats['lc2']), F.upsample(h, scale_factor=2, mode='bilinear')], dim=-3)
+        h = self.blend_lc2(h)
+        h = torch.cat([self.project_lc1(feats['lc1']), F.upsample(h, scale_factor=2, mode='bilinear')], dim=-3)
+        h = self.blend_lc1(h)
+        h = self.predictor(h)
+        h = F.upsample(h, scale_factor=4, mode='bilinear')
+        return h
+
+
 APPMODS = {'GaussiansAgame': GaussiansAgame, 'GaussiansAgameHack': GaussiansAgameHack}
 DYNMODS = {'RGMPLike': RGMPLike, 'RGMPLikeNoInit': RGMPLikeNoInit}
 FUSMODS = {'FusionAgame': FusionAgame}

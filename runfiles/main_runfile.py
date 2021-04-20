@@ -210,7 +210,7 @@ def main():
     torch.backends.cudnn.benchmark = True
 
     model = models.AGAME(
-        backbone=('resnet101s16', (True, ('layer4',),('layer4',),('layer2',),('layer1',))),
+        backbone=('resnet101lc', (True, ('layer4',))),
         appearance=('GaussiansAgame', (2048, 512, .1, -2)),
         dynamic=('RGMPLike', ([('ConvRelu', (2*2048+2*2,512,1,1,0)),
                                ('DilationpyramidRelu',(512,512,3,1,(1,3,6),(1,3,6))),
@@ -218,7 +218,7 @@ def main():
         fusion=('FusionAgame',
                 ([('ConvRelu',(516,512,3,1,1)), ('ConvRelu',(512,128,3,1,1))],
                  [('Conv', (128, 2, 1, 1, 0))])),
-        segmod=('UpsampleAgame', ({'s8':512,'s4':256}, 128)),
+        segmod=('UpsampleLC', ({'lc4':256,'lc3':256,'lc2':256,'lc1':256}, 128)),
         update_with_fine_scores=False, update_with_softmax_aggregation=False, process_first_frame=True,
         output_logsegs=True, output_coarse_logsegs=True, output_segs=False)
     print("Network model {} loaded, (size: {})".format(model.__class__.__name__, utils.get_model_size_str(model)))

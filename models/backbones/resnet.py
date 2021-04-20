@@ -5,6 +5,7 @@ import math
 import torch.utils.model_zoo as model_zoo
 
 from local_config import config
+from models.layer_cascade import LayerCascadeModule
 
 
 __all__ = ['ResNet', 'resnet18', 'resnet34', 'resnet50', 'resnet101', 'resnet152',
@@ -277,7 +278,8 @@ class ResNetS16(ResNet):
 class ResNetS16V2(ResNetS16):
     def get_return_values(self, feats):
         return {'s16': feats['layer4'], 'layer3': feats['layer3'], 'layer2': feats['layer2'], 'layer1': feats['layer1'], 'conv1': feats['conv1']}
-    
+
+
 def resnet18(pretrained=False, **kwargs):
     """Constructs a ResNet-18 model.
 
@@ -394,4 +396,75 @@ def resnet152(pretrained=False, **kwargs):
     model = ResNet(Bottleneck, [3, 8, 36, 3], **kwargs)
     if pretrained:
         model.load_state_dict(model_zoo.load_url(model_urls['resnet152'], model_dir=config['nn_weights_path']))
+    return model
+
+
+class ResNetS16LC(ResNet):
+    def __init__(self, finetune_layers, block, layers, num_classes=1000):
+        super().__init__(block, layers, num_classes)
+        self.finetune_layers = finetune_layers
+
+        self.lcm1 = LayerCascadeModule(256, 64, 128, 64, 256)
+        self.lcm2 = LayerCascadeModule(512, 256, 1024, 64, 256)
+        self.lcm3 = LayerCascadeModule(1024, 512, 2048, 64, 256)
+        self.lcm4 = LayerCascadeModule(2048, 1024, None, 64, 256)
+
+        # Set strided convolutions, deeplab-style
+        self.layer4[0].downsample[0].stride = (1,1)
+        self.layer4[0].conv2.stride = (1,1)
+        for layer in self.layer4[1:]:
+            layer.conv2.dilation = (2,2)
+            layer.conv2.padding = (2,2)
+
+        # Make only part of the feature extractor trainable
+        self.requires_grad = False
+        for param in self.parameters():
+            param.requires_grad = False
+        for module_name in finetune_layers:
+            getattr(self, module_name).train(True)
+            getattr(self, module_name).requires_grad = True
+            for param in getattr(self, module_name).parameters():
+                param.requires_grad = True
+
+    def get_return_values(self, feats):
+        return {
+            's16': feats['layer4'],
+            'lc4': feats['lc4'],
+            'lc3': feats['lc3'],
+            'lc2': feats['lc2'],
+            'lc1': feats['lc1']
+        }
+
+    def get_features(self, x):
+        feats = {}
+        x = self.conv1(x)
+        x = self.bn1(x)
+        x = self.relu(x)
+        x0 = self.maxpool(x)
+        feats['conv1'] = x0
+        x1 = self.layer1(x0)
+        feats['layer1'] = x1
+        x2 = self.layer2(x1)
+        feats['layer2'] = x2
+        x3 = self.layer3(x2)
+        feats['layer3'] = x3
+        x4 = self.layer4(x3)
+        feats['layer4'] = x4
+
+        l1 = self.lcm1(x1, x0, x2)
+        feats['lc1'] = l1
+        l2 = self.lcm2(x2, x1, x3)
+        feats['lc2'] = l2
+        l3 = self.lcm3(x3, x2, x4)
+        feats['lc3'] = l3
+        l4 = self.lcm4(x4, x3, None)
+        feats['lc4'] = l4
+
+        return self.get_return_values(feats)
+
+
+def resnet101lc(pretrained=False, finetune_layers=(), **kwargs):
+    model = ResNetS16LC(finetune_layers, Bottleneck, [3, 4, 23, 3], **kwargs)
+    if pretrained:
+        model.load_state_dict(model_zoo.load_url(model_urls['resnet101'], model_dir=config['nn_weights_path']))
     return model
