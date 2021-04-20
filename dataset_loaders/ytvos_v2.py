@@ -79,8 +79,9 @@ class YTVOSV2(torch.utils.data.Dataset):
         an annotated frame and containing at least one more annotated frame.
         """
         print("-- YTVOS dataset initialization started.")
-        framework_path = os.path.join(os.path.dirname(__file__), '..')
-        cache_path = os.path.join(framework_path, 'cache', 'ytvos_v2_{}_100px_threshold.json'.format(self._split))
+        # framework_path = os.path.join(os.path.dirname(__file__), '..')
+        # cache_path = os.path.join(framework_path, 'cache', 'ytvos_v2_{}_100px_threshold.json'.format(self._split))
+        cache_path = '/content/drive/MyDrive/cache/ytvos_v2_train_100px_threshold.json'
 
         # First find visible objects in all annotated frames
         if os.path.exists(cache_path):

@@ -340,7 +340,7 @@ class UpsampleLC(nn.Module):
 APPMODS = {'GaussiansAgame': GaussiansAgame, 'GaussiansAgameHack': GaussiansAgameHack}
 DYNMODS = {'RGMPLike': RGMPLike, 'RGMPLikeNoInit': RGMPLikeNoInit}
 FUSMODS = {'FusionAgame': FusionAgame}
-SEGMODS = {'UpsampleAgame': UpsampleAgame}
+SEGMODS = {'UpsampleAgame': UpsampleAgame, 'UpsampleLC': UpsampleLC}
 SUBMODS = {'DilationpyramidRelu': DilationpyramidRelu, 'ConvRelu': ConvRelu, 'Conv': Conv, 'LinearRelu': LinearRelu}
 
 class TrackSeg(nn.Module):

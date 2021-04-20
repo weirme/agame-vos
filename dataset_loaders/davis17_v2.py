@@ -75,8 +75,9 @@ class DAVIS17V2(torch.utils.data.Dataset):
         an annotated frame and containing at least one more annotated frame.
         """
         print("-- DAVIS17 dataset initialization started.")
-        framework_path = os.path.join(os.path.dirname(__file__), '..')
-        cache_path = os.path.join(framework_path, 'cache', 'davis17_v2_visible_objects_100px_threshold.json')
+        # framework_path = os.path.join(os.path.dirname(__file__), '..')
+        # cache_path = os.path.join(framework_path, 'cache', 'davis17_v2_visible_objects_100px_threshold.json')
+        cache_path = '/content/drive/MyDrive/cache/davis17_v2_visible_objects_100px_threshold.json'
 
         # First find visible objects in all annotated frames
         if os.path.exists(cache_path):
