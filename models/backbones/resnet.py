@@ -5,11 +5,10 @@ import math
 import torch.utils.model_zoo as model_zoo
 
 from local_config import config
-from models.layer_cascade import LayerCascadeModule
 
 
 __all__ = ['ResNet', 'resnet18', 'resnet34', 'resnet50', 'resnet101', 'resnet152',
-           'resnet101_block34', 'resnet101_block14', 'resnet101s16', 'resnet50s16', 'resnet101s16v2', 'resnet101lc']
+           'resnet101_block34', 'resnet101_block14', 'resnet101s16', 'resnet50s16', 'resnet101s16v2']
 
 
 model_urls = {
@@ -277,9 +276,8 @@ class ResNetS16(ResNet):
 
 class ResNetS16V2(ResNetS16):
     def get_return_values(self, feats):
-        return {'layer4': feats['layer4'], 'layer3': feats['layer3'], 'layer2': feats['layer2'], 'layer1': feats['layer1'], 'conv1': feats['conv1']}
-
-
+        return {'s16': feats['layer4'], 'layer3': feats['layer3'], 'layer2': feats['layer2'], 'layer1': feats['layer1'], 'conv1': feats['conv1']}
+    
 def resnet18(pretrained=False, **kwargs):
     """Constructs a ResNet-18 model.
 
@@ -396,48 +394,4 @@ def resnet152(pretrained=False, **kwargs):
     model = ResNet(Bottleneck, [3, 8, 36, 3], **kwargs)
     if pretrained:
         model.load_state_dict(model_zoo.load_url(model_urls['resnet152'], model_dir=config['nn_weights_path']))
-    return model
-
-
-class ResNetS16LC(nn.Module):
-    def __init__(self, finetune_layers, **kwargs):
-        super().__init__()
-        self.resnet = resnet101s16v2(True, finetune_layers, s16_feats=('layer4',), s8_feats=('layer2',),
-                   s4_feats=('layer1',), **kwargs)
-
-        self.lcm1 = LayerCascadeModule(256, 64, 512, 64, 256)
-        self.lcm2 = LayerCascadeModule(512, 256, 1024, 64, 256)
-        self.lcm3 = LayerCascadeModule(1024, 512, 2048, 64, 256)
-        self.lcm4 = LayerCascadeModule(2048, 1024, None, 64, 256)
-
-    def get_return_values(self, feats):
-        return {
-            's16': feats['layer4'],
-            'lc4': feats['lc4'],
-            'lc3': feats['lc3'],
-            'lc2': feats['lc2'],
-            'lc1': feats['lc1']
-        }
-
-    def get_features(self, x):
-        feats = self.resnet.get_features(x)
-        x0 = feats['conv1']
-        x1 = feats['layer1']
-        x2 = feats['layer2']
-        x3 = feats['layer3']
-        x4 = feats['layer4']
-        l1 = self.lcm1(x1, x0, x2)
-        feats['lc1'] = l1
-        l2 = self.lcm2(x2, x1, x3)
-        feats['lc2'] = l2
-        l3 = self.lcm3(x3, x2, x4)
-        feats['lc3'] = l3
-        l4 = self.lcm4(x4, x3, None)
-        feats['lc4'] = l4
-
-        return self.get_return_values(feats)
-
-
-def resnet101lc(pretrained=False, finetune_layers=(), **kwargs):
-    model = ResNetS16LC(finetune_layers, **kwargs)
     return model

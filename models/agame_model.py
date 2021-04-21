@@ -5,6 +5,8 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 import models
+from models.model_utils import *
+from models.sim import SIM
 import utils
 
 DEVICE=torch.device("cuda")
@@ -58,56 +60,6 @@ def unpad(tensor, padding):
         tensor = tensor[:, :, :, padding[2]:height - padding[3], padding[0]:width - padding[1]]
         return tensor
 
-class LinearRelu(nn.Sequential):
-    def __init__(self, *linear_args):
-        super().__init__()
-        self.add_module('linear', nn.Linear(*linear_args))
-        self.add_module('naf', nn.ReLU(inplace=True))
-        for m in self.children():
-            if isinstance(m, nn.Linear):
-                nn.init.kaiming_uniform_(m.weight)
-                if m.bias is not None:
-                    nn.init.constant_(m.bias, 0)
-class ConvRelu(nn.Sequential):
-    def __init__(self, *conv_args):
-        super().__init__()
-        self.add_module('conv', nn.Conv2d(*conv_args))
-        self.add_module('naf', nn.ReLU(inplace=True))
-        for m in self.children():
-            if isinstance(m, nn.Conv2d):
-                nn.init.kaiming_uniform_(m.weight)
-                if m.bias is not None:
-                    nn.init.constant_(m.bias, 0)
-class Conv(nn.Sequential):
-    def __init__(self, *conv_args):
-        super().__init__()
-        self.add_module('conv', nn.Conv2d(*conv_args))
-        for m in self.children():
-            if isinstance(m, nn.Conv2d):
-                nn.init.kaiming_uniform_(m.weight)
-                if m.bias is not None:
-                    nn.init.constant_(m.bias, 0)
-class DilationpyramidRelu(nn.Module):
-    def __init__(self, nchannels_in, nchannels_out, kernel_size, stride, paddings, dilations):
-        super().__init__()
-        assert len(paddings) == len(dilations)
-        self.nlevels = len(paddings)
-        for i in range(self.nlevels):
-            self.add_module('conv{:d}'.format(i), nn.Conv2d(nchannels_in, nchannels_out, kernel_size, stride, paddings[i], dilations[i]))
-        self.add_module('naf', nn.ReLU(inplace=True))
-        for m in self.children():
-            if isinstance(m, nn.Conv2d):
-                nn.init.kaiming_uniform_(m.weight)
-                if m.bias is not None:
-                    nn.init.constant_(m.bias, 0)                    
-    def forward(self, x):
-        h = []
-        for i in range(self.nlevels):
-            h.append(getattr(self, 'conv{:d}'.format(i))(x))
-        h = torch.cat(h, dim=-3)
-        h = self.naf(h)
-        return h
-
 class GaussiansAgame(nn.Module):
     def __init__(self, nchannels_in, nchannels_lda, lr, cov_reg_init, residual=True, covest=True):
         super().__init__()
@@ -118,10 +70,11 @@ class GaussiansAgame(nn.Module):
         self.cov_reg = nn.Parameter(cov_reg_init * torch.ones(4, 1, nchannels_lda, 1, 1))
         nn.init.kaiming_uniform_(self.conv_in.weight)
     def get_init_state(self, ref_feats, ref_seg):
-        B, C, H, W = ref_feats['s16'].size()
+        B, C, H, W = ref_feats['lc3'].size()
         N = H * W
         K1 = ref_seg.size(1)
-        conv_ref_feats = self.conv_in(ref_feats['s16'])
+        ref_seg = F.avg_pool2d(ref_seg.float(), 4)
+        conv_ref_feats = self.conv_in(ref_feats['lc3'])
         means = [F.adaptive_avg_pool2d(conv_ref_feats * ref_seg[:,i:i+1,:,:], 1)
                  / (1/N + F.adaptive_avg_pool2d(ref_seg[:,i:i+1,:,:], 1))
                  for i in range(K1)]
@@ -338,7 +291,7 @@ class UpsampleLC(nn.Module):
 
 
 APPMODS = {'GaussiansAgame': GaussiansAgame, 'GaussiansAgameHack': GaussiansAgameHack}
-DYNMODS = {'RGMPLike': RGMPLike, 'RGMPLikeNoInit': RGMPLikeNoInit}
+DYNMODS = {'SIM': SIM, 'RGMPLike': RGMPLike, 'RGMPLikeNoInit': RGMPLikeNoInit}
 FUSMODS = {'FusionAgame': FusionAgame}
 SEGMODS = {'UpsampleAgame': UpsampleAgame, 'UpsampleLC': UpsampleLC}
 SUBMODS = {'DilationpyramidRelu': DilationpyramidRelu, 'ConvRelu': ConvRelu, 'Conv': Conv, 'LinearRelu': LinearRelu}
@@ -450,7 +403,7 @@ class AGAME(nn.Module):
 
             state = {}
             for obj_idx in object_ids:
-                given_seg = F.avg_pool2d(torch.cat([init_label!=obj_idx, init_label==obj_idx], dim=-3).float(), 16)
+                given_seg = F.avg_pool2d(torch.cat([init_label!=obj_idx, init_label==obj_idx], dim=-3).float(), 4)
                 state[obj_idx] = self.trackseg.get_init_state(video_frames[0], given_seg)
         else: # use previous state, update labels if needed
             object_ids = list(state.keys())
@@ -460,7 +413,7 @@ class AGAME(nn.Module):
                 if 0 in object_ids: object_ids.remove(0)
                 
                 for obj_idx in new_object_ids:
-                    given_seg = F.avg_pool2d(torch.cat([init_label!=obj_idx, init_label==obj_idx], dim=-3).float(), 16)
+                    given_seg = F.avg_pool2d(torch.cat([init_label!=obj_idx, init_label==obj_idx], dim=-3).float(), 4)
                     if state.get(obj_idx) is None:
                         state[obj_idx] = self.trackseg.get_init_state(video_frames[0], given_seg)
                     else:
@@ -501,7 +454,7 @@ class AGAME(nn.Module):
                 
                 for obj_idx in new_object_ids:
                     given_label_as_segmap_lst = [given_labels[i]!=obj_idx, given_labels[i]==obj_idx]
-                    given_seg = F.avg_pool2d(torch.cat(given_label_as_segmap_lst, dim=-3).float(), 16)
+                    given_seg = F.avg_pool2d(torch.cat(given_label_as_segmap_lst, dim=-3).float(), 4)
                     if state.get(obj_idx) is None:
                         state[obj_idx] = self.trackseg.get_init_state(video_frames[i], given_seg)
                         object_visibility[obj_idx] = i
@@ -523,10 +476,10 @@ class AGAME(nn.Module):
 
             if self.update_with_softmax_aggregation:
                 assert not self.training, "Cannot update state with softmax-aggregated scores during training (yet)"
-                update_seg = {n: F.avg_pool2d(aggregated_seg[n], 16) for n in object_ids}
+                update_seg = {n: F.avg_pool2d(aggregated_seg[n], 4) for n in object_ids}
             elif self.update_with_fine_scores:
                 assert not self.training, "Cannot update state with fine scores during training, long recurrency..."
-                update_seg = {k: F.avg_pool2d(predicted_seg[k], 16) for k in object_ids}
+                update_seg = {k: F.avg_pool2d(predicted_seg[k], 4) for k in object_ids}
             else:
                 update_seg = {k: F.softmax(coarse_segscore[k], dim=-3) for k in object_ids}
 
@@ -540,7 +493,7 @@ class AGAME(nn.Module):
                     logseg_lsts[k].append(F.log_softmax(segscore[k], dim=-3))
                 if self.output_coarse_logsegs:
                     coarse_logseg_lsts[k].append(F.interpolate(F.log_softmax(coarse_segscore[k], dim=-3),
-                                                               scale_factor=16, mode='bilinear'))
+                                                               scale_factor=4, mode='bilinear'))
             if self.output_segs:
                 if isinstance(given_labels, (list, tuple)) and given_labels[i] is not None and i == 0:
                     seg_lst.append(given_labels[i])
